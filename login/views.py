@@ -3,9 +3,70 @@ from django.shortcuts import redirect
 #引入表单 模型
 from . import models
 from . import forms
+
 import hashlib
 
+import datetime
+
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
 # Create your views here.
+def send_email(email, code):
+
+    subject = '来自www.liujiangblog.com的注册确认邮件'
+    text_content = '''感谢注册www.liujiangblog.com，这里是刘江的博客和教程站点，专注于Python、Django和机器学习技术的分享！\
+                    如果你看到这条消息，说明你的邮箱服务器不提供HTML链接功能，请联系管理员！'''
+    html_content = '''
+                    <p>感谢注册<a href="http://{}/confirm/?code={}" target=blank>www.liujiangblog.com</a>，\
+                    这里是刘江的博客和教程站点，专注于Python、Django和机器学习技术的分享！</p>
+                    <p>请点击站点链接完成注册确认！</p>
+                    <p>此链接有效期为{}天！</p>
+                    '''.format('127.0.0.1:8000', code, settings.CONFIRM_DAYS)
+    #format对应｛｝
+    msg = EmailMultiAlternatives(subject, text_content, settings.EMAIL_HOST_USER, [email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+def user_confirm(request):
+    #从请求的url地址中获取确认码
+    code = request.GET.get('code', None)
+    message = ''
+    try:
+        #先去数据库内查询是否有对应的确认码
+        confirm = models.ConfirmString.objects.get(code=code)
+    except:
+        message = '无效的确认请求!'
+        return render(request, 'login/confirm.html', locals())
+#获取注册的时间c_time
+    c_time = confirm.c_time
+    #获取确认时间
+    now = datetime.datetime.now()
+    #加上设置的过期天数，这里是7天，然后与现在时间点进行对比
+    if now > c_time + datetime.timedelta(settings.CONFIRM_DAYS):
+        #如果时间已经超期，删除注册的用户，同时注册码对象也会一并删除
+        confirm.user.delete()
+        message = '您的邮件已经过期！请重新注册!'
+        return render(request, 'login/confirm.html', locals())
+    else:
+        #修改用户的has_confirmed字段为True，并保存
+        confirm.user.has_confirmed = True
+        confirm.user.save()
+        #删除注册码对象，但不删除用户本身
+        confirm.delete()
+        message = '感谢确认，请使用账户登录！'
+        return render(request, 'login/confirm.html', locals())
+
+
+#接收一个用户对象作为参数，创建新模型对象
+def make_confirm_string(user):
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # hash_code()方法以用户名为基础，now为‘盐’，生成一个独一无二的哈希值
+    code = hash_code(user.name, now)
+    #调用ConfirmString模型(模型都有）的create()方法，生成并保存一个确认码对象
+    models.ConfirmString.objects.create(code=code, user=user,)
+    return code
+
+
 def hash_code(s, salt='mysite'):# 加点盐
     h = hashlib.sha256()
     s += salt
@@ -58,7 +119,7 @@ def login(request):
     # 不允许重复登录
     if request.session.get('is_login', None):
         return redirect('/index/')
-    #先实例化，不然出不了输入框
+        # 先实例化，不然出不了输入框
     login_form = forms.UserForm()
     if request.method == 'POST':
         login_form = forms.UserForm(request.POST)
@@ -73,6 +134,10 @@ def login(request):
                 message = '用户不存在！'
                 return render(request, 'login/login.html', locals())
 
+            if not user.has_confirmed:
+                message = '该用户还未经过邮件确认！'
+                return render(request, 'login/login.html', locals())
+
             if user.password == hash_code(password):
                 #往session字典内写入用户状态和数据：
                 request.session['is_login'] = True
@@ -85,6 +150,7 @@ def login(request):
         else:
             return render(request, 'login/login.html', locals())
     return render(request, 'login/login.html', locals())
+
 
 def register(request):
     if request.session.get('is_login', None):
@@ -119,8 +185,13 @@ def register(request):
                 new_user.email = email
                 new_user.sex = sex
                 new_user.save()
+                #创建确认码对象的方法
+            code = make_confirm_string(new_user)
+            #邮件地址 确认码参数发送
+            send_email(email, code)
 
-                return redirect('/login/')
+            message = '请前往邮箱进行确认！'
+            return render(request, 'login/confirm.html', locals())
         else:
             return render(request, 'login/register.html', locals())
     register_form = forms.RegisterForm()

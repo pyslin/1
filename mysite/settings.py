@@ -123,3 +123,11 @@ USE_TZ = False
 # https://docs.djangoproject.com/en/2.2/howto/static-files/
 
 STATIC_URL = '/static/'
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.163.com'
+EMAIL_PORT = 25
+EMAIL_HOST_USER = 'py78xxx@163.com'
+EMAIL_HOST_PASSWORD = 'hb0714'
+# 注册有效期天数
+CONFIRM_DAYS = 7
